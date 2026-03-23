@@ -7,3 +7,4 @@ pytz
 datetime
 python-dotenv
 pytest
+httpx

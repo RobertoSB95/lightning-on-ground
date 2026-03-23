@@ -1,7 +1,6 @@
 # send_request.py
 import logging
-import requests
-from requests import Response
+import httpx
 from urllib.parse import unquote
 from config import (
     GPS_SERVICE_ENDPOINT_UYU,
@@ -25,7 +24,7 @@ MAX_RETRIES = 2
 
 # ── Uruguay ───────────────────────────────────────────────────────
 
-def consultar_moviles_UYU() -> Response:
+async def consultar_moviles_UYU() -> httpx.Response:
     """
     Consulta la flota completa de vehículos Uruguay.
 
@@ -33,7 +32,7 @@ def consultar_moviles_UYU() -> Response:
         Respuesta SOAP con la flota de vehículos.
 
     Raises:
-        RuntimeError: Si la consulta falla después de los reintentos.
+        RuntimeError: Si la consulta falla.
     """
     soap_body = f"""
         <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ws="http://ws.wc.web.com.ar">
@@ -46,13 +45,13 @@ def consultar_moviles_UYU() -> Response:
             </soapenv:Body>
         </soapenv:Envelope>
     """
-    return _enviar_solicitud_soap(
+    return await _enviar_solicitud_soap(
         soap_body,
         {"Content-Type": "text/xml", "SOAPAction": "urn:consultarMovilesFlota"}
     )
 
 
-def consultar_posiciones_moviles_UYU(movildata: list) -> Response:
+async def consultar_posiciones_moviles_UYU(movildata: list) -> httpx.Response:
     """
     Consulta posiciones de vehículos Uruguay.
 
@@ -77,43 +76,37 @@ def consultar_posiciones_moviles_UYU(movildata: list) -> Response:
        </soapenv:Body>
     </soapenv:Envelope>
     """
-    return _enviar_solicitud_soap(
+    return await _enviar_solicitud_soap(
         soap_body,
         {"Content-Type": "text/xml", "SOAPAction": "urn:consultarPosicionesMovilesUsuario"}
     )
 
 
-def _enviar_solicitud_soap(soap_body: str, headers: dict) -> Response:
+async def _enviar_solicitud_soap(soap_body: str, headers: dict) -> httpx.Response:
     """
     Envía una solicitud SOAP al servicio GPS Uruguay.
-
-    Args:
-        soap_body: Cuerpo XML de la solicitud.
-        headers: Cabeceras HTTP.
-
-    Returns:
-        Respuesta HTTP de la solicitud.
 
     Raises:
         RuntimeError: Si la solicitud falla.
     """
     try:
-        response = requests.post(
-            GPS_SERVICE_ENDPOINT_UYU,
-            data=soap_body,
-            headers=headers
-        )
-        response.raise_for_status()
-        return response
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                GPS_SERVICE_ENDPOINT_UYU,
+                content=soap_body,
+                headers=headers
+            )
+            response.raise_for_status()
+            return response
 
-    except requests.RequestException as e:
+    except httpx.HTTPError as e:
         logger.error("Error en solicitud SOAP a Uruguay: %s", e)
         raise RuntimeError("Error consultando GPS Uruguay") from e
 
 
 # ── Argentina ─────────────────────────────────────────────────────
 
-def consultar_moviles_ARG() -> list:
+async def consultar_moviles_ARG() -> list:
     """
     Consulta la flota completa de vehículos Argentina.
 
@@ -127,12 +120,13 @@ def consultar_moviles_ARG() -> list:
     }
 
     try:
-        response = requests.post(
-            GPS_SERVICE_ENDPOINT_ARG,
-            headers={"Content-Type": "application/json"},
-            json=payload
-        )
-        response.raise_for_status()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                GPS_SERVICE_ENDPOINT_ARG,
+                headers={"Content-Type": "application/json"},
+                json=payload
+            )
+            response.raise_for_status()
 
         vehiculos = []
         for data in response.json():
@@ -150,12 +144,12 @@ def consultar_moviles_ARG() -> list:
         logger.info("Vehículos ARG obtenidos: %d", len(vehiculos))
         return vehiculos
 
-    except requests.RequestException as e:
+    except httpx.HTTPError as e:
         logger.error("Error consultando flota Argentina: %s", e)
         raise RuntimeError("Error consultando GPS Argentina") from e
 
 
-def consultar_posiciones_moviles_ARG(movildata: list) -> list:
+async def consultar_posiciones_moviles_ARG(movildata: list) -> list:
     """
     Consulta posiciones de vehículos Argentina.
 
@@ -168,20 +162,21 @@ def consultar_posiciones_moviles_ARG(movildata: list) -> list:
     movilIds = [m["movilId"] for m in movildata]
 
     payload = {
-        "user":     GPS_SERVICE_USERNAME_ARG,
-        "pwd":      GPS_SERVICE_PASSWORD_ARG,
-        "action":   "DATOSACTUALES",
+        "user":      GPS_SERVICE_USERNAME_ARG,
+        "pwd":       GPS_SERVICE_PASSWORD_ARG,
+        "action":    "DATOSACTUALES",
         "vehiculos": movilIds,
-        "tipoID":   "id",
+        "tipoID":    "id",
     }
 
     try:
-        response = requests.post(
-            GPS_SERVICE_ENDPOINT_ARG,
-            headers={"Content-Type": "application/json"},
-            json=payload
-        )
-        response.raise_for_status()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                GPS_SERVICE_ENDPOINT_ARG,
+                headers={"Content-Type": "application/json"},
+                json=payload
+            )
+            response.raise_for_status()
 
         vehiculos = []
         for data in response.json():
@@ -203,19 +198,19 @@ def consultar_posiciones_moviles_ARG(movildata: list) -> list:
         logger.info("Posiciones ARG obtenidas: %d", len(vehiculos))
         return vehiculos
 
-    except requests.RequestException as e:
+    except httpx.HTTPError as e:
         logger.error("Error consultando posiciones Argentina: %s", e)
         raise RuntimeError("Error consultando posiciones GPS Argentina") from e
 
 
 # ── XWeather ──────────────────────────────────────────────────────
 
-def xWeather_request(latitud: float, longitud: float) -> Response:
+async def xWeather_request(latitud: float, longitud: float) -> httpx.Response:
     """
     Consulta la API de rayos para una ubicación.
 
     Args:
-        latitud: Latitud del punto a consultar.
+        latitud:  Latitud del punto a consultar.
         longitud: Longitud del punto a consultar.
 
     Returns:
@@ -234,11 +229,12 @@ def xWeather_request(latitud: float, longitud: float) -> Response:
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            response = requests.get(url)
-            response.raise_for_status()
-            return response
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                return response
 
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             logger.warning(
                 "Intento %d/%d fallido para XWeather [%.4f, %.4f]: %s",
                 attempt, MAX_RETRIES, latitud, longitud, e
@@ -246,5 +242,5 @@ def xWeather_request(latitud: float, longitud: float) -> Response:
             if attempt == MAX_RETRIES:
                 logger.error("XWeather falló después de %d intentos", MAX_RETRIES)
                 raise RuntimeError("Error consultando API de rayos") from e
-    
+
     raise RuntimeError("XWeather no pudo ejecutarse — MAX_RETRIES inválido")
